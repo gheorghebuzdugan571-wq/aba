@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
@@ -17,6 +18,7 @@ import net.minecraft.text.StyleSpriteSource;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.random.Random;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -140,8 +142,13 @@ public class ModHelperClient implements ClientModInitializer {
             Text result = rebuild(original, p.nickEnd(), p.bodyStart(), tag, buttons, font);
 
             if (config.playSound) {
-                mc.execute(() -> mc.getSoundManager().play(
-                        PositionedSoundInstance.master(SoundEvents.ENTITY_PLAYER_LEVELUP, config.soundPitch)));
+                mc.execute(() -> {
+       if (mc.player == null) return;
+       mc.getSoundManager().play(new PositionedSoundInstance(
+               SoundEvents.ENTITY_PLAYER_LEVELUP, SoundCategory.MASTER,
+               config.soundVolume, config.soundPitch, Random.create(),
+               mc.player.getX(), mc.player.getY(), mc.player.getZ()));
+   });
             }
             return result;
         } catch (Exception e) {
