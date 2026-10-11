@@ -43,8 +43,7 @@ public class ModHelperClient implements ClientModInitializer {
         reload();
 
         ClientReceiveMessageEvents.MODIFY_GAME.register((message, overlay) -> overlay ? message : process(message, null));
-        ClientReceiveMessageEvents.MODIFY_CHAT.register((message, signed, sender, params, ts) ->
-                process(message, sender == null ? null : sender.name()));
+       
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(ClientCommandManager.literal("modhelper")
@@ -142,7 +141,7 @@ public class ModHelperClient implements ClientModInitializer {
 
             if (config.playSound) {
                 mc.execute(() -> mc.getSoundManager().play(
-                        PositionedSoundInstance.master(SoundEvents.ENTITY_PLAYER_LEVELUP, config.soundPitch, config.soundVolume)));
+                        PositionedSoundInstance.master(SoundEvents.ENTITY_PLAYER_LEVELUP, config.soundPitch)));
             }
             return result;
         } catch (Exception e) {
