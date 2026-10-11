@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "modhelper",
+  "version": "${version}",
+  "name": "Moderator Helper",
+  "description": "Подсвечивает нарушения правил в чате, показывает причину возле ника и даёт кнопку быстрого мута.",
+  "authors": ["me"],
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["local.modhelper.ModHelperClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
