@@ -35,9 +35,9 @@ public record Rule(String id, String title, boolean ban, int minutes, int severi
         return minutes + c.minuteSuffix;
     }
 
-    /** Причина для команды мута. */
+    /** Причина для команды мута — только номер пункта, например "3.1". */
     public String reason() {
-        return id + " " + title;
+        return id;
     }
 
     /** Текст для тега в чате. */

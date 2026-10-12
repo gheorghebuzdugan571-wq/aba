@@ -35,14 +35,16 @@ public final class Detector {
             w("чмо(?![\\p{L}\\d])"), w("чмошн\\p{L}*"), w("чтоб\\s+ты\\s+сдох"), w("кретин\\p{L}*"));
 
     // ---- прочее ----
-    private static final Pattern SYMBOL_SPAM = Pattern.compile("([^\\p{L}\\d\\s])\\1{3,}");
-    private static final Pattern LAUGH_SPAM = Pattern.compile("(?:ха|ах|хе|хи|лол|lol|аха|haha|ahah){4,}");
+    /** Буквы, разделённые пробелами/точками: "д е б и л", "д.е.б.и.л". */
+    private static final Pattern SPACED = Pattern.compile("(?<![\\p{L}\\d])(?:\\p{L}[\\s.\\-_*,]+){3,}\\p{L}(?![\\p{L}\\d])");
+    /** Слова-числа вроде 1000000000 или 1.000.000 — не спам. */
+    private static final Pattern NUMBERISH = Pattern.compile("[\\d.,'_-]+");
     private static final Pattern SUICIDE = w("убей\\s*ся|убей\\s+себя|повес(?:ься|ь\\s+себя)|вскрой(?:ся|\\s+вены)|выпились|спрыгни\\s+с\\p{L}*|сдохни|сделай\\s+харакири");
     private static final Pattern ALT_F4 = Pattern.compile("alt\\s*\\+?\\s*f\\s*4");
     private static final Pattern BEG_PUNISH = w("(?:дай\\p{L}*|выдай\\p{L}*)\\s+(?:мне\\s+|себе\\s+)?(?:мут|бан)\\p{L}*|(?:замут\\p{L}*|забан\\p{L}*)\\s+(?:меня|себя)");
     private static final Pattern BEG_RES = w("(?:дай\\p{L}*|выдай\\p{L}*|подкин\\p{L}*|подар\\p{L}*|кинь|скинь)\\s+(?:мне\\s+)?(?:админк\\p{L}*|вип|випк\\p{L}*|донат\\p{L}*|привилеги\\p{L}*|ресурс\\p{L}*|алмаз\\p{L}*|денег|деньги|монет\\p{L}*)");
     private static final Pattern DISCORD = Pattern.compile("discord|дискорд|disc0rd|dis\\s*cord|(?<![\\p{L}\\d])(?:дс|ds)(?![\\p{L}\\d])|\\w{2,32}#\\d{4}");
-    private static final Pattern AD = Pattern.compile("(?:https?://|www\\.)\\S+|\\b(?:\\d{1,3}\\.){3}\\d{1,3}(?::\\d{2,5})?\\b|\\b[a-z0-9-]{2,}\\.(?:ru|com|net|org|gg|su|fun|pro|io|me|xyz|club|top|online|site|tk|ml)\\b");
+    private static final Pattern AD = Pattern.compile("(?:https?://|www\\.)\\S+|\\b(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?::\\d{2,5})?\\b|\\b[a-z0-9-]{2,}\\.(?:ru|com|net|org|gg|su|fun|pro|io|me|xyz|club|top|online|site|tk|ml)\\b");
     private static final Pattern PARENT = w("(?:твою|твоей|твоя|твоим)\\s+(?:мать|мамк\\p{L}*|мамаш\\p{L}*|маму|мам[аы]|родител\\p{L}*)|(?:мать|мамк\\p{L}*|мамаш\\p{L}*|маму|мама)\\s+(?:твою|твоя|твоей)");
     private static final Pattern PARENT_STRONG = w("ебал\\p{L}*\\s+(?:твою\\s+)?(?:мать|маму|мамк\\p{L}*|мамаш\\p{L}*)");
     private static final Pattern NEG = w("говно\\p{L}*|говн\\p{L}*|гавн\\p{L}*|дерьм\\p{L}*|параш\\p{L}*|мусор\\p{L}*|помойк\\p{L}*|хуйн\\p{L}*|отстой|днищ\\p{L}*|скам|убог\\p{L}*|сосет\\p{L}*|сосат\\p{L}*|сдох\\p{L}*|умер\\p{L}*");
@@ -50,12 +52,15 @@ public final class Detector {
     private static final Pattern THREAT = w("забаню|забаним|забанят|замучу|замутим|замутят|выдам\\s+(?:тебе\\s+)?(?:мут|бан)|получишь\\s+(?:мут|бан)");
 
     private final Config cfg;
+    private final Pattern symbolSpam;
     private final Map<String, Deque<Sample>> history = new HashMap<>();
 
-    private record Sample(long time, String norm, Set<String> words) {}
+    private record Sample(long time, String norm, List<String> words) {}
 
     public Detector(Config cfg) {
         this.cfg = cfg;
+        int n = Math.max(2, cfg.symbolRepeat);
+        this.symbolSpam = Pattern.compile("([^\\p{L}\\d\\s])\\1{" + (n - 1) + ",}");
     }
 
     public List<Rule> check(String nick, String msg) {
@@ -63,36 +68,39 @@ public final class Detector {
         String cyr = toCyr(low);
         Set<Rule> hits = new LinkedHashSet<>();
 
-        // 3.1 флуд: 3+ одинаковых/ПОХОЖИХ (в т.ч. слегка изменённых) сообщений за 60 секунд
+        // 3.1 флуд: N+ одинаковых/ПОХОЖИХ сообщений от одного ника за окно времени.
+        // Похожими считаются и слегка изменённые, и «шаблонные» (одна фраза, меняется последнее слово).
         String norm = collapse(cyr.replaceAll("[^\\p{L}]", ""));
-        if (norm.isEmpty()) norm = low.trim();
         if (norm.length() > 120) norm = norm.substring(0, 120);
         List<String> words = words(cyr);
-        Set<String> wset = new HashSet<>(words);
         if (history.size() > 1000) history.clear();
         long now = System.currentTimeMillis();
+        long windowMs = Math.max(1, cfg.floodWindowSeconds) * 1000L;
         Deque<Sample> dq = history.computeIfAbsent(nick.toLowerCase(Locale.ROOT), k -> new ArrayDeque<>());
-        while (!dq.isEmpty() && now - dq.peekFirst().time() > 60_000) dq.pollFirst();
-        int similar = 1;
-        for (Sample sm : dq) {
-            if (similar(sm.norm(), norm) || (wset.size() >= 3 && jaccard(sm.words(), wset) >= 0.8)) similar++;
-        }
-        dq.addLast(new Sample(now, norm, wset));
-        if (similar >= 3) {
-            hits.add(Rule.R_3_1);
-            dq.clear();
+        while (!dq.isEmpty() && now - dq.peekFirst().time() > windowMs) dq.pollFirst();
+        if (norm.length() >= 3) {
+            int similar = 1;
+            for (Sample sm : dq) {
+                if (similarMsg(sm.norm(), sm.words(), norm, words)) similar++;
+            }
+            dq.addLast(new Sample(now, norm, words));
+            while (dq.size() > 30) dq.pollFirst();
+            if (similar >= Math.max(2, cfg.floodCount)) hits.add(Rule.R_3_1);
         }
 
         // 3.1 повторы ВНУТРИ одного сообщения: слова, фразы, предложения
         if (hasRepeats(words, cyr)) hits.add(Rule.R_3_1R);
 
         // 3.4 / 3.5
-        if (SYMBOL_SPAM.matcher(low).find() || LAUGH_SPAM.matcher(low).find()) hits.add(Rule.R_3_4);
+        if (isSymbolSpam(low)) hits.add(Rule.R_3_4);
         if (isCaps(msg)) hits.add(Rule.R_3_5);
 
         // 3.7 / 3.8
-        int mat = count(MAT, cyr) + 2 * count(MAT_PHRASES, cyr);
-        boolean insult = count(INSULT, cyr) > 0;
+        // проверяем и обычный текст, и с «схлопнутыми» буквами (дебиииил), и с буквами через пробел (д е б и л)
+        String coll = collapse(cyr);
+        String spaced = joinSpaced(cyr);
+        int mat = Math.max(matScore(cyr), matScore(coll)) + matScore(spaced);
+        boolean insult = count(INSULT, cyr) > 0 || count(INSULT, coll) > 0 || count(INSULT, spaced) > 0;
         if (mat >= cfg.matThreshold) hits.add(Rule.R_3_7);
         if (insult || (mat > 0 && mat < cfg.matThreshold)) hits.add(Rule.R_3_8);
         boolean rude = insult || mat > 0;
@@ -225,28 +233,75 @@ public final class Detector {
         return out;
     }
 
-    private static double jaccard(Set<String> a, Set<String> b) {
-        if (a.isEmpty() || b.isEmpty()) return 0;
-        int inter = 0;
-        for (String x : a) if (b.contains(x)) inter++;
-        return (double) inter / (a.size() + b.size() - inter);
-    }
-
-    private static boolean isCaps(String msg) {
-        int words = 0, letters = 0, upper = 0;
+    /** 3.5: капсом N+ слов целиком, либо 50%+ букв заглавные при 3+ словах. */
+    private boolean isCaps(String msg) {
+        int words = 0, letters = 0, upper = 0, capsWords = 0;
         for (String tok : msg.split("\\s+")) {
-            boolean has = false;
+            int tl = 0, tu = 0;
             for (int i = 0; i < tok.length(); i++) {
                 char ch = tok.charAt(i);
                 if (Character.isLetter(ch)) {
-                    has = true;
-                    letters++;
-                    if (Character.isUpperCase(ch)) upper++;
+                    tl++;
+                    if (Character.isUpperCase(ch)) tu++;
                 }
             }
-            if (has) words++;
+            if (tl > 0) {
+                words++;
+                letters += tl;
+                upper += tu;
+                if (tl >= 2 && tu == tl) capsWords++;
+            }
         }
+        if (capsWords >= Math.max(2, cfg.capsWords)) return true;
         return words >= 3 && letters > 0 && upper * 2 >= letters;
+    }
+
+    /** 3.4: !!!!, ////, и длинные «слова» из 1-3 разных символов (АХАХАХАХАХ, ПХПХПХПХХПХПХ, ыыыыыыыыыы). */
+    private boolean isSymbolSpam(String low) {
+        if (symbolSpam.matcher(low).find()) return true;
+        for (String tok : low.split("\\s+")) {
+            if (tok.length() < cfg.spamRunLength) continue;
+            if (NUMBERISH.matcher(tok).matches()) continue;
+            Set<Character> distinct = new HashSet<>();
+            for (int i = 0; i < tok.length(); i++) distinct.add(tok.charAt(i));
+            if (distinct.size() <= 3) return true;
+        }
+        return false;
+    }
+
+    private boolean similarMsg(String an, List<String> aw, String bn, List<String> bw) {
+        if (an.equals(bn)) return true;
+        int max = Math.max(an.length(), bn.length());
+        if (max >= 6 && 1.0 - (double) levenshtein(an, bn) / max >= cfg.floodSimilarity) return true;
+        return aw.size() >= 3 && bw.size() >= 3 && dice(aw, bw) >= cfg.floodWordSimilarity;
+    }
+
+    /** Доля совпавших слов (с поправкой на опечатки): 2*совпало / (слов в A + слов в B). */
+    private static double dice(List<String> a, List<String> b) {
+        if (a.isEmpty() || b.isEmpty()) return 0;
+        boolean[] used = new boolean[b.size()];
+        int matched = 0;
+        for (String x : a) {
+            for (int j = 0; j < b.size(); j++) {
+                if (!used[j] && sameWord(x, b.get(j))) {
+                    used[j] = true;
+                    matched++;
+                    break;
+                }
+            }
+        }
+        return 2.0 * matched / (a.size() + b.size());
+    }
+
+    private static int matScore(String text) {
+        return count(MAT, text) + 2 * count(MAT_PHRASES, text);
+    }
+
+    private static String joinSpaced(String cyr) {
+        Matcher m = SPACED.matcher(cyr);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) sb.append(m.group().replaceAll("[^\\p{L}]", "")).append(' ');
+        return sb.toString();
     }
 
     private static int count(List<Pattern> list, String text) {

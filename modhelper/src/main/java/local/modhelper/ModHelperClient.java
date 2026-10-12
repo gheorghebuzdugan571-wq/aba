@@ -9,22 +9,24 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Style;
-import net.minecraft.text.StyleSpriteSource;
 import net.minecraft.text.Text;
+import net.minecraft.text.TextColor;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.random.Random;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,14 +40,13 @@ public class ModHelperClient implements ClientModInitializer {
     private static Config config;
     private static Detector detector;
 
-    private record Parsed(String nick, String msg, int nickEnd, int bodyStart) {}
+    private record Parsed(String nick, String msg, int nickStart, int nickEnd, int bodyStart) {}
 
     @Override
     public void onInitializeClient() {
         reload();
 
-        ClientReceiveMessageEvents.MODIFY_GAME.register((message, overlay) -> overlay ? message : process(message, null));
-       
+        ClientReceiveMessageEvents.MODIFY_GAME.register((message, overlay) -> overlay ? message : process(message));
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(ClientCommandManager.literal("modhelper")
@@ -90,25 +91,21 @@ public class ModHelperClient implements ClientModInitializer {
         detector = new Detector(config);
     }
 
-    private static Parsed parse(String plain, String fallbackNick) {
+    private static Parsed parse(String plain) {
         for (Pattern p : config.compiledPatterns) {
             Matcher m = p.matcher(plain);
             if (m.matches()) {
-                return new Parsed(m.group("nick"), m.group("msg"), m.end("nick"), m.start("msg"));
+                return new Parsed(m.group("nick"), m.group("msg"), m.start("nick"), m.end("nick"), m.start("msg"));
             }
-        }
-        if (fallbackNick != null) {
-            // Сервер прислал чистый текст без ника — берём ник из профиля отправителя.
-            return new Parsed(fallbackNick, plain, 0, 0);
         }
         return null;
     }
 
-    private static Text process(Text original, String fallbackNick) {
+    private static Text process(Text original) {
         try {
             if (!config.enabled) return original;
             String plain = original.getString();
-            Parsed p = parse(plain, fallbackNick);
+            Parsed p = parse(plain);
             if (p == null || !SAFE_NICK.matcher(p.nick()).matches()) return original;
             if (isIgnored(p, plain)) return original;
 
@@ -118,37 +115,33 @@ public class ModHelperClient implements ClientModInitializer {
             List<Rule> hits = detector.check(p.nick(), p.msg());
             if (hits.isEmpty()) return original;
 
-            Rule top = hits.get(0);
+            // Одно правило = одна запись (3.1 может прийти дважды: «похожие» и «повтор слов»)
+            Map<String, Rule> byId = new LinkedHashMap<>();
+            for (Rule r : hits) byId.putIfAbsent(r.id(), r);
 
-            // Причина возле ника
+            // Причины возле ника — только номера пунктов, подробности в подсказке при наведении
             StringBuilder all = new StringBuilder("Нарушения:");
             for (Rule r : hits) all.append("\n• ").append(r.display());
-            MutableText tag = Text.literal(" [⚠ " + top.display() + "]")
+            MutableText tag = Text.literal(" [⚠ " + String.join(", ", byId.keySet()) + "]")
                     .setStyle(Style.EMPTY.withColor(Formatting.RED).withBold(true)
                             .withHoverEvent(new HoverEvent.ShowText(Text.literal(all.toString()))));
 
-            // Кнопки мута (максимум 2 самых тяжёлых нарушения-мута). Для банов кнопок пока нет.
+            // По кнопке мута на КАЖДОЕ нарушенное правило (кроме банов — для них кнопок пока нет)
             MutableText buttons = Text.empty();
             int shown = 0;
-            for (Rule r : hits) {
+            for (Rule r : byId.values()) {
                 if (r.ban()) continue;
                 buttons.append(muteButton(r, p.nick()));
-                if (++shown >= 2) break;
+                if (++shown >= Math.max(1, config.maxButtons)) break;
             }
 
-            Identifier font = Identifier.tryParse(config.fontId);
-            if (font == null) font = Identifier.of("minecraft", "uniform");
+            String scope = config.highlightScope.toLowerCase(Locale.ROOT);
+            int colorFrom = scope.equals("all") ? 0 : scope.equals("body") ? p.bodyStart() : p.nickStart();
 
-            Text result = rebuild(original, p.nickEnd(), p.bodyStart(), tag, buttons, font);
+            Text result = rebuild(original, p.nickEnd(), colorFrom, tag, buttons, config.highlightRgb);
 
             if (config.playSound) {
-                mc.execute(() -> {
-       if (mc.player == null) return;
-       mc.getSoundManager().play(new PositionedSoundInstance(
-               SoundEvents.ENTITY_PLAYER_LEVELUP, SoundCategory.MASTER,
-               config.soundVolume, config.soundPitch, Random.create(),
-               mc.player.getX(), mc.player.getY(), mc.player.getZ()));
-   });
+                mc.execute(() -> playAlert(mc));
             }
             return result;
         } catch (Exception e) {
@@ -169,6 +162,28 @@ public class ModHelperClient implements ClientModInitializer {
         return false;
     }
 
+    private static SoundEvent pickSound(String name) {
+        return switch (name.toLowerCase(Locale.ROOT)) {
+            case "levelup" -> SoundEvents.ENTITY_PLAYER_LEVELUP;
+            case "anvil" -> SoundEvents.BLOCK_ANVIL_LAND;
+            case "bell" -> SoundEvents.BLOCK_BELL_USE;
+            default -> SoundEvents.ENTITY_ARROW_HIT_PLAYER;
+        };
+    }
+
+    /** Громкость выше 1.0 игра не даёт, поэтому для «громче» играем несколько копий звука одновременно. */
+    private static void playAlert(MinecraftClient mc) {
+        if (mc.player == null) return;
+        SoundEvent sound = pickSound(config.soundName);
+        int layers = Math.max(1, Math.min(config.soundLayers, 6));
+        for (int i = 0; i < layers; i++) {
+            mc.getSoundManager().play(new PositionedSoundInstance(
+                    sound, SoundCategory.MASTER,
+                    config.soundVolume, config.soundPitch, Random.create(),
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ()));
+        }
+    }
+
     private static Text muteButton(Rule rule, String nick) {
         String cmd = config.muteCommand
                 .replace("{nick}", nick)
@@ -176,20 +191,23 @@ public class ModHelperClient implements ClientModInitializer {
                 .replace("{reason}", rule.reason());
         // В 1.21.6+ click-событие всегда выполняет команду, слеш в начале не нужен.
         String clickCmd = cmd.startsWith("/") ? cmd.substring(1) : cmd;
-        String label = " [МУТ " + rule.time(config) + "]";
+        String label = " [" + config.muteButtonLabel
+                .replace("{id}", rule.id())
+                .replace("{time}", rule.time(config)) + "]";
 
         return Text.literal(label).setStyle(Style.EMPTY
                 .withColor(Formatting.GOLD)
                 .withBold(true)
                 .withClickEvent(new ClickEvent.RunCommand(clickCmd))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal("Нажми — выполнится:\n/" + clickCmd))));
+                .withHoverEvent(new HoverEvent.ShowText(Text.literal(
+                        "Нажми — выполнится:\n/" + clickCmd + "\nПричина: " + rule.display()))));
     }
 
     /**
      * Пересобирает сообщение: вставляет тег причины сразу после ника (tagAt),
-     * меняет шрифт у текста самого сообщения (с bodyFrom) и добавляет кнопки в конец.
+     * красит текст с позиции colorFrom в цвет подсветки и добавляет кнопки в конец.
      */
-    private static Text rebuild(Text original, int tagAt, int bodyFrom, Text tag, Text buttons, Identifier font) {
+    private static Text rebuild(Text original, int tagAt, int colorFrom, Text tag, Text buttons, int rgb) {
         record Seg(Style style, String text) {}
         List<Seg> segs = new ArrayList<>();
         original.visit((style, str) -> {
@@ -197,7 +215,7 @@ public class ModHelperClient implements ClientModInitializer {
             return Optional.empty();
         }, Style.EMPTY);
 
-        StyleSpriteSource.Font fontSource = new StyleSpriteSource.Font(font);
+        TextColor color = TextColor.fromRgb(rgb);
 
         MutableText out = Text.empty();
         int pos = 0;
@@ -209,8 +227,8 @@ public class ModHelperClient implements ClientModInitializer {
                 int abs = pos + i;
                 int next = s.length();
                 if (!tagDone && tagAt > abs) next = Math.min(next, tagAt - pos);
-                if (bodyFrom > abs) next = Math.min(next, bodyFrom - pos);
-                Style st = abs >= bodyFrom ? seg.style().withFont(fontSource) : seg.style();
+                if (colorFrom > abs) next = Math.min(next, colorFrom - pos);
+                Style st = abs >= colorFrom ? seg.style().withColor(color) : seg.style();
                 out.append(Text.literal(s.substring(i, next)).setStyle(st));
                 i = next;
                 if (!tagDone && pos + i == tagAt) {
