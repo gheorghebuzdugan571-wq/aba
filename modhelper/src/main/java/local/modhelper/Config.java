@@ -17,7 +17,7 @@ import java.util.regex.PatternSyntaxException;
 public final class Config {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     /** Версия формата конфига: при росте версии шаблоны чата и звук сбрасываются на новые значения по умолчанию. */
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 4;
 
     public int configVersion = 0;
     public boolean enabled = true;
@@ -50,8 +50,8 @@ public final class Config {
     public String minuteSuffix = "m";
 
     // ---- пороги ----
-    /** Сколько матерных слов нужно для 3.7 (в правилах «от 2+ слов»). */
-    public int matThreshold = 2;
+    /** Сколько матерных слов нужно для 3.7. 1 = любое матерное слово; 2 = строго по правилам «от 2+ слов». */
+    public int matThreshold = 1;
     /** Сколько раз слово должно повториться в одном сообщении (или подряд). */
     public int repeatWordThreshold = 3;
     /** Сколько похожих предложений в одном сообщении считается повтором. */
@@ -63,12 +63,14 @@ public final class Config {
     public double floodSimilarity = 0.7;
     /** Похожесть по словам (0..1): доля совпавших слов, нужна для шаблонного спама. */
     public double floodWordSimilarity = 0.6;
-    /** 3.4: слово длиной от N символов, состоящее максимум из 3 разных символов (АХАХАХАХАХ, ПХПХПХПХПХ). */
+    /** 3.4: слово БЕЗ пробелов длиной от N символов, состоящее максимум из 3 разных символов (АХАХАХАХАХ, ПХПХПХПХПХ, !!!!!!!!!!). */
     public int spamRunLength = 10;
-    /** 3.4: столько одинаковых знаков подряд (!!!!, ////). */
-    public int symbolRepeat = 4;
+    /** 3.4: столько одинаковых знаков подряд без пробелов (!!!!!!!!!!). Меньше — не флуд. */
+    public int symbolRepeat = 10;
     /** 3.5: столько слов целиком КАПСОМ. */
     public int capsWords = 3;
+    /** 3.5: слова короче этого числа букв (LL, ZZ, GG, EZ) в капсе не учитываются. */
+    public int capsMinWordLength = 3;
 
     /** Шаблоны разбора строки чата. Обязательны группы (?<nick>...) и (?<msg>...). */
     public List<String> chatPatterns = new ArrayList<>(List.of(
@@ -113,15 +115,21 @@ public final class Config {
             ModHelperClient.LOG.warn("Не удалось прочитать конфиг, использую настройки по умолчанию", e);
         }
         if (c == null) c = new Config();
-        if (c.configVersion < CURRENT_VERSION) {
-            Config d = new Config();
+        Config d = new Config();
+        if (c.configVersion < 2) {
             c.chatPatterns = d.chatPatterns;
             c.soundName = d.soundName;
             c.soundLayers = d.soundLayers;
             c.soundVolume = d.soundVolume;
             c.soundPitch = d.soundPitch;
-            c.configVersion = CURRENT_VERSION;
         }
+        if (c.configVersion < 3) {
+            c.matThreshold = d.matThreshold;
+        }
+        if (c.configVersion < 4) {
+            c.symbolRepeat = d.symbolRepeat;
+        }
+        c.configVersion = CURRENT_VERSION;
         c.fixNulls();
         c.compile();
         c.save();
