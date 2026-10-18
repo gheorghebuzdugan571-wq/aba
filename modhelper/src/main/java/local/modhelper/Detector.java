@@ -14,13 +14,18 @@ public final class Detector {
 
     // ---- 3.7 мат (слова = 1 балл, фразы = 2 балла) ----
     private static final List<Pattern> MAT = List.of(
-            w("ебанат\\p{L}*"), w("выебал\\p{L}*"), w("блядин\\p{L}*"), w("гандон\\p{L}*"),
-            w("долбаеб\\p{L}*"), w("ебанько"), w("еблан\\p{L}*"), w("пидор\\p{L}*"), w("пидр\\p{L}*"),
-            w("пиздабол\\p{L}*"), w("пипидастр\\p{L}*"), w("хуесос\\p{L}*"), w("хуйло"),
+            w("(?:за|у|на|вы|по|от|до|пере|раз|с|съ|под|при|про|об)?еб(?:ал|ан|ат|ну|ыр|уч|ис|ет|ут|уш|ли|ля|ск|л)\\p{L}*"),
+            w("пизд\\p{L}*"), w("бля\\p{L}*"),
+            w("(?:на|по|ни|от|до|за|рас|с)?ху(?:й|и|е|я|ю)\\p{L}*"),
+            w("муд(?:ак|ил|оз|ач)\\p{L}*"), w("залуп\\p{L}*"), w("дроч\\p{L}*"),
+            w("пид[оаэ]р\\p{L}*"), w("пидр\\p{L}*"), w("педик\\p{L}*"), w("педераст\\p{L}*"), w("пипидастр\\p{L}*"),
+            w("г[ао]ндон\\p{L}*"), w("долб[оа]еб\\p{L}*"),
+            w("сук(?:а|и|е|у|ой|ам|ами)(?![\\p{L}\\d])"), w("сучк\\p{L}*"), w("сучар\\p{L}*"), w("сукин\\p{L}*"),
             w("шлюх\\p{L}*"), w("шалав\\p{L}*"));
     private static final List<Pattern> MAT_PHRASES = List.of(
-            w("иди\\s+на\\s+хуй"), w("я\\s+ебал\\p{L}*"), w("го\\s+секс"),
-            w("го\\s+в\\s+попочк\\p{L}*"), w("дам\\s+в\\s+рот"));
+            w("(?:пошел|пошол|пошла|пошли|иди|идите)\\s+(?:на\\s*)?(?:ху(?:й|и|е|я|ю)\\p{L}*|хер\\p{L}*|хрен\\p{L}*)"),
+            w("я\\s+ебал\\p{L}*"), w("го\\s+секс"), w("го\\s+в\\s+попочк\\p{L}*"), w("дам\\s+в\\s+рот"),
+            w("еб\\s+твою\\s+мат\\p{L}*"));
 
     // ---- 3.8 оскорбления ----
     private static final List<Pattern> INSULT = List.of(
@@ -32,14 +37,25 @@ public final class Detector {
             w("нищ(?:ий|ая|ие|его|ему|им)"), w("нищеброд\\p{L}*"), w("немощ(?:ь|ный)"),
             w("обоссан\\p{L}*"), w("обезьян\\p{L}*"), w("оболтус\\p{L}*"), w("овощь(?![\\p{L}\\d])"),
             w("твар(?:ь|и)(?![\\p{L}\\d])"), w("туп(?:ой|ая|ое|ые|ица|ого|орыл\\p{L}*)"),
-            w("чмо(?![\\p{L}\\d])"), w("чмошн\\p{L}*"), w("чтоб\\s+ты\\s+сдох"), w("кретин\\p{L}*"));
+            w("чмо(?![\\p{L}\\d])"), w("чмошн\\p{L}*"), w("чтоб\\s+ты\\s+сдох"), w("кретин\\p{L}*"),
+            // ебало и «закрой рот»-фразы
+            w("еба(?:ло|льник)\\p{L}*"), w("хлеба(?:ло|льник)\\p{L}*"),
+            w("(?:завали|заткни|закрой|захлопни|прикрой)\\s+(?:свое\\s+|свою\\s+|свой\\s+|твое\\s+)?(?:ебало|ебальник|хлебало|хлебальник|пасть|рот|клюв|жало)"),
+            w("ублюд\\p{L}*"), w("выродок"), w("выродк\\p{L}*"), w("урод(?:ы|ина|ка|у|ом|а)?(?![\\p{L}\\d])"),
+            w("скотин\\p{L}*"), w("сволоч\\p{L}*"), w("подонок"), w("подонк\\p{L}*"),
+            w("отсос\\p{L}*"), w("соси(?![\\p{L}\\d])"), w("гнид(?:а|ы|ой|у|е)(?![\\p{L}\\d])"));
+
+    // ---- слова, которые ловим даже с ошибкой в одной букве (далбаеб, пидорсы) ----
+    private static final String[] FUZZY_MAT = {"долбаеб", "долбоеб", "ебанат", "ебанько", "пидорас", "пидарас",
+            "пидрила", "пиздабол", "хуесос", "гандон", "блядина", "мудозвон", "пипидастр", "выебал", "залупа"};
+    private static final String[] FUZZY_INSULT = {"кретин", "бездарь", "лошара", "ублюдок", "скотина", "обезьяна"};
 
     // ---- прочее ----
     /** Буквы, разделённые пробелами/точками: "д е б и л", "д.е.б.и.л". */
     private static final Pattern SPACED = Pattern.compile("(?<![\\p{L}\\d])(?:\\p{L}[\\s.\\-_*,]+){3,}\\p{L}(?![\\p{L}\\d])");
     /** Слова-числа вроде 1000000000 или 1.000.000 — не спам. */
     private static final Pattern NUMBERISH = Pattern.compile("[\\d.,'_-]+");
-    private static final Pattern SUICIDE = w("убей\\s*ся|убей\\s+себя|повес(?:ься|ь\\s+себя)|вскрой(?:ся|\\s+вены)|выпились|спрыгни\\s+с\\p{L}*|сдохни|сделай\\s+харакири");
+    private static final Pattern SUICIDE = w("убей\\s*ся|убей\\s+себя|повес(?:ься|ь\\s+себя)|вскрой(?:ся|\\s+вены)|выпились|спрыгни\\s+с\\p{L}*|сдохни|умри(?![\\p{L}\\d])|сделай\\s+харакири");
     private static final Pattern ALT_F4 = Pattern.compile("alt\\s*\\+?\\s*f\\s*4");
     private static final Pattern BEG_PUNISH = w("(?:дай\\p{L}*|выдай\\p{L}*)\\s+(?:мне\\s+|себе\\s+)?(?:мут|бан)\\p{L}*|(?:замут\\p{L}*|забан\\p{L}*)\\s+(?:меня|себя)");
     private static final Pattern BEG_RES = w("(?:дай\\p{L}*|выдай\\p{L}*|подкин\\p{L}*|подар\\p{L}*|кинь|скинь)\\s+(?:мне\\s+)?(?:админк\\p{L}*|вип|випк\\p{L}*|донат\\p{L}*|привилеги\\p{L}*|ресурс\\p{L}*|алмаз\\p{L}*|денег|деньги|монет\\p{L}*)");
@@ -96,17 +112,26 @@ public final class Detector {
         if (isCaps(msg)) hits.add(Rule.R_3_5);
 
         // 3.7 / 3.8
-        // проверяем и обычный текст, и с «схлопнутыми» буквами (дебиииил), и с буквами через пробел (д е б и л)
+        // Проверяем несколько вариантов текста, чтобы поймать обходы:
+        //  coll   — «схлопнутые» буквы (дебиииил)
+        //  spaced — буквы через пробел/точки (д е б и л)
+        //  tr     — латиница «по звучанию» в кириллицу (poshol nahui -> пошол нахуи, pidaras -> пидарас)
         String coll = collapse(cyr);
         String spaced = joinSpaced(cyr);
-        int mat = Math.max(matScore(cyr), matScore(coll)) + matScore(spaced);
-        boolean insult = count(INSULT, cyr) > 0 || count(INSULT, coll) > 0 || count(INSULT, spaced) > 0;
-        if (mat >= cfg.matThreshold) hits.add(Rule.R_3_7);
+        String tr = translit(low);
+        String trColl = collapse(tr);
+        int mat = Math.max(Math.max(matScore(cyr), matScore(coll)), Math.max(matScore(tr), matScore(trColl)))
+                + matScore(spaced)
+                + Math.max(fuzzyMat(cyr), Math.max(fuzzyMat(coll), fuzzyMat(tr)));
+        boolean insult = count(INSULT, cyr) > 0 || count(INSULT, coll) > 0 || count(INSULT, spaced) > 0
+                || count(INSULT, tr) > 0 || count(INSULT, trColl) > 0
+                || fuzzyInsult(cyr) || fuzzyInsult(coll) || fuzzyInsult(tr);
+        if (mat >= Math.max(1, cfg.matThreshold)) hits.add(Rule.R_3_7);
         if (insult || (mat > 0 && mat < cfg.matThreshold)) hits.add(Rule.R_3_8);
         boolean rude = insult || mat > 0;
 
         // 3.9
-        if (SUICIDE.matcher(cyr).find()) hits.add(Rule.R_3_9);
+        if (SUICIDE.matcher(cyr).find() || SUICIDE.matcher(tr).find()) hits.add(Rule.R_3_9);
 
         // 3.10 оскорбление проекта
         if (containsAny(cfg.projectNames, low, cyr) && (rude || NEG.matcher(cyr).find())) hits.add(Rule.R_3_10);
@@ -233,8 +258,9 @@ public final class Detector {
         return out;
     }
 
-    /** 3.5: капсом N+ слов целиком, либо 50%+ букв заглавные при 3+ словах. */
+    /** 3.5: капсом N+ слов целиком, либо 50%+ букв заглавные при 3+ словах. Короткие слова (LL, ZZ, GG, EZ) не считаются. */
     private boolean isCaps(String msg) {
+        int minLen = Math.max(2, cfg.capsMinWordLength);
         int words = 0, letters = 0, upper = 0, capsWords = 0;
         for (String tok : msg.split("\\s+")) {
             int tl = 0, tu = 0;
@@ -245,11 +271,11 @@ public final class Detector {
                     if (Character.isUpperCase(ch)) tu++;
                 }
             }
-            if (tl > 0) {
+            if (tl >= minLen) {
                 words++;
                 letters += tl;
                 upper += tu;
-                if (tl >= 2 && tu == tl) capsWords++;
+                if (tu == tl) capsWords++;
             }
         }
         if (capsWords >= Math.max(2, cfg.capsWords)) return true;
@@ -291,6 +317,97 @@ public final class Detector {
             }
         }
         return 2.0 * matched / (a.size() + b.size());
+    }
+
+    private static final Map<String, Character> DIGRAPHS = Map.of(
+            "sh", 'ш', "ch", 'ч', "zh", 'ж', "kh", 'х', "ts", 'ц', "yo", 'е', "yu", 'ю', "ya", 'я', "ye", 'е');
+
+    /** Латиница -> кириллица «по звучанию»: poshol nahui -> пошол нахуи, huesos -> хуесос. */
+    private static String translit(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        int i = 0;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c < 'a' || c > 'z') {
+                sb.append(c);
+                i++;
+                continue;
+            }
+            if (s.startsWith("shch", i)) { sb.append('щ'); i += 4; continue; }
+            if (s.startsWith("sch", i)) { sb.append('щ'); i += 3; continue; }
+            if (i + 1 < s.length()) {
+                Character d = DIGRAPHS.get(s.substring(i, i + 2));
+                if (d != null) { sb.append(d.charValue()); i += 2; continue; }
+            }
+            switch (c) {
+                case 'a' -> sb.append('а');
+                case 'b' -> sb.append('б');
+                case 'c' -> sb.append('к');
+                case 'd' -> sb.append('д');
+                case 'e' -> sb.append('е');
+                case 'f' -> sb.append('ф');
+                case 'g' -> sb.append('г');
+                case 'h' -> sb.append('х');
+                case 'i' -> sb.append('и');
+                case 'j' -> sb.append('й');
+                case 'k' -> sb.append('к');
+                case 'l' -> sb.append('л');
+                case 'm' -> sb.append('м');
+                case 'n' -> sb.append('н');
+                case 'o' -> sb.append('о');
+                case 'p' -> sb.append('п');
+                case 'q' -> sb.append('к');
+                case 'r' -> sb.append('р');
+                case 's' -> sb.append('с');
+                case 't' -> sb.append('т');
+                case 'u' -> sb.append('у');
+                case 'v' -> sb.append('в');
+                case 'w' -> sb.append('в');
+                case 'x' -> sb.append('х');
+                case 'y' -> sb.append('й');
+                default -> sb.append('з'); // z
+            }
+            i++;
+        }
+        return sb.toString();
+    }
+
+    private static boolean exactAny(String token) {
+        for (Pattern p : MAT) if (p.matcher(token).lookingAt()) return true;
+        for (Pattern p : INSULT) if (p.matcher(token).lookingAt()) return true;
+        return false;
+    }
+
+    /** Слово похоже на корень с ошибкой не более чем в одной букве (долбаеб -> далбаеб). */
+    private static boolean fuzzyRoot(String token, String root) {
+        if (token.length() < root.length() - 1) return false;
+        for (int len = root.length() - 1; len <= root.length() + 1; len++) {
+            if (len > token.length()) break;
+            if (levenshtein(token.substring(0, len), root) <= 1) return true;
+        }
+        return false;
+    }
+
+    /** Сколько слов — «почти мат» (не совпавших точно, но отличающихся на одну букву). */
+    private static int fuzzyMat(String text) {
+        int n = 0;
+        for (String t : text.split("[^\\p{L}]+")) {
+            if (t.length() < 6 || exactAny(t)) continue;
+            for (String r : FUZZY_MAT) {
+                if (fuzzyRoot(t, r)) { n++; break; }
+            }
+        }
+        return n;
+    }
+
+    private static boolean fuzzyInsult(String text) {
+        for (String t : text.split("[^\\p{L}]+")) {
+            if (t.length() < 6 || exactAny(t)) continue;
+            for (String r : FUZZY_INSULT) {
+                if (fuzzyRoot(t, r)) return true;
+            }
+        }
+        return false;
     }
 
     private static int matScore(String text) {
